@@ -76,10 +76,12 @@ def Image_Steganography(action: int, input_image_path: str, output_path: str, se
         print("[+] Bắt đầu nhúng Payload vào ảnh...")
         img = Image.open(imgFile)
         (width, height) = img.size
-        conv = img.convert("RGBA")
+        original_format = img.format
+        original_mode = img.mode
+        has_alpha = "A" in original_mode or "transparency" in img.info
         print("[*] Kích thước ảnh: %dx%d pixels." % (width, height))
-        max_size = width * height * lsb_bits / 8 / 1024
-        print("[*] Kích thước của ảnh: %.2f KB." % (max_size))
+        max_size = width * height * lsb_bits / 8
+        print("[*] Dung lượng của ảnh: %.2f B." % (os.path.getsize(imgFile)))
         
         # Đọc và xử lý payload
         if os.path.isfile(payload):
@@ -114,8 +116,7 @@ def Image_Steganography(action: int, input_image_path: str, output_path: str, se
             sys.exit()
         
         # Tạo ảnh mới
-        steg_img = Image.new('RGBA', (width, height))
-        
+        steg_img = Image.new(original_mode, img.size, (0, 0, 0, 0))
         
         # Tối ưu hóa phần nhúng dữ liệu vào ảnh
         idx = 0
@@ -124,7 +125,7 @@ def Image_Steganography(action: int, input_image_path: str, output_path: str, se
         for h in range(height):
             row_pixels = []
             for w in range(width):
-                r, g, b, a = conv.getpixel((w, h))
+                r, g, b, a = steg_img.getpixel((w, h))
                 
                 # Xử lý mỗi kênh màu hiệu quả hơn
                 if idx < len(data_enc):
@@ -149,16 +150,27 @@ def Image_Steganography(action: int, input_image_path: str, output_path: str, se
                 steg_img.putpixel((w, h), pixel)
             
         if not output_path:
-            output_path = os.path.dirname(input_image_path) + "/" + os.path.basename(input_image_path).split(".")[0] + "_encoded.png"
+            # Giữ định dạng gốc
+            ext = os.path.splitext(input_image_path)[1]
+            output_path = f"{os.path.splitext(input_image_path)[0]}_encoded{ext}"
         
-        if output_path.endswith(".jpg"):
+        if output_path.endswith((".jpg", ".jpeg")):
             img_out = steg_img.convert("RGB")
-            # exif_data = img.getexif()
-            quality = 100 - compress_level*100
+            quality = 100 - min(compress_level*10, 95)
             img_out.save(output_path, quality=quality)
-        elif output_path.endswith(".png"):
-            img_out = steg_img.convert("RGBA")
-            steg_img.save(output_path, compress_level=compress_level)
+        else:
+            # Giữ định dạng và chế độ màu tương tự ảnh gốc
+            if has_alpha:
+                img_out = steg_img
+            else:
+                img_out = steg_img.convert("RGB")
+            
+            img_out.save(
+                output_path,
+                format='PNG',
+                optimize=True,
+                compress_level=compress_level
+            )
         print(f"[+] Dung lượng ảnh đã lưu: {os.path.getsize(output_path):.2f} B")
         if password:
             print(f"[+] {payload} đã nhúng thành công với mật khẩu {password}!")
@@ -191,7 +203,8 @@ def Image_Steganography(action: int, input_image_path: str, output_path: str, se
 
         if not out_file:
             out_file = os.path.dirname(in_file) + "/" + os.path.basename(in_file).split(".")[0] + "_decoded"
-                    
+        if not os.path.isfile(out_file):
+            os.makedirs(os.path.dirname(out_file), exist_ok=True) # Tạo thư mục nếu chưa tồn tại
         with open(out_file, "wb") as out_f: # Ghi dữ liệu đã giải mã vào file
             out_f.write(data_dec) # Ghi dữ liệu đã giải mã vào file
         ftype(out_file, password) # Kiểm tra loại file và giải nén nếu cần
